@@ -91,7 +91,7 @@ public class TestingController {
         System.out.println("Client " + clientId + " started streaming");
 
         //Creating topic for the first time if it does not exist. Can dynamically change the topic name afterwards if required.
-        String topicName = "topicR";
+        String topicName = "topic";
         createTopicIfNotExists(topicName, defaultPartitions);
 
         // Fetch and process documents in batches
