@@ -2,7 +2,10 @@ package com.testingone.example.testingone;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mongodb.client.MongoChangeStreamCursor;
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.FullDocument;
 import jakarta.annotation.PreDestroy;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -12,14 +15,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.web.bind.annotation.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @RestController
 @RequestMapping("/api")
@@ -69,6 +72,7 @@ public class TestingController {
 
         // Fetch and process documents in batches
         processDocumentsInBatches(clientId, topicName,collectionName);
+        startChangeStream(clientId,topicName,collectionName);
 
         return "Streaming Completed";
     }
@@ -87,11 +91,12 @@ public class TestingController {
         System.out.println("Client " + clientId + " started streaming");
 
         //Creating topic for the first time if it does not exist. Can dynamically change the topic name afterwards if required.
-        String topicName = "topic";
+        String topicName = "topicR";
         createTopicIfNotExists(topicName, defaultPartitions);
 
         // Fetch and process documents in batches
         processDocumentsInBatches(clientId, topicName,collectionName);
+        startChangeStream(clientId,topicName,collectionName);
 
         return "Streaming Completed";
     }
@@ -174,6 +179,43 @@ public class TestingController {
             e.printStackTrace();
         }
     }
+
+    private void startChangeStream(String clientId, String topicName, String collectionName) {
+        executorService.submit(() -> {
+            while (true) {
+                try (MongoChangeStreamCursor<ChangeStreamDocument<Document>> cursor = (MongoChangeStreamCursor<ChangeStreamDocument<Document>>) mongoTemplate
+                        .getCollection(collectionName)
+                        .watch()
+                        .fullDocument(FullDocument.UPDATE_LOOKUP)
+                        .iterator()) {
+                    long startTime = System.currentTimeMillis();
+                    boolean dataReceived = false;
+
+                    while (cursor.hasNext()) {
+                        ChangeStreamDocument<Document> change = cursor.next();
+                        Document document = change.getFullDocument();
+                        if (document != null) {
+                            processDocument(document, clientId, topicName);
+                            dataReceived = true;
+                            startTime=System.currentTimeMillis();
+                        }
+                    }
+
+                    // Check if data was received within 10 seconds
+                    if (!dataReceived && (System.currentTimeMillis() - startTime) >= 10000) {
+                        System.out.println("No data received for 10 seconds. Exiting...");
+                        return;
+                    }
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.out.println("Change stream cursor disconnected.");
+                    return;
+                }
+            }
+        });
+    }
+
 
     private void processDocument(Document document, String clientId, String topicName) {
         try {
