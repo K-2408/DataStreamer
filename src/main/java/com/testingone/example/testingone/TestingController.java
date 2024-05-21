@@ -43,6 +43,12 @@ public class TestingController {
     private static final int THREAD_POOL_SIZE = 10;
     private ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
+    // Remember to shut down the executor service appropriately
+    @PreDestroy
+    public void shutdown() {
+        executorService.shutdown();
+    }
+
 
     @PostMapping("/start-stream-twitter")
     public String startStream(@RequestHeader("Authorization") String authToken) {
@@ -177,12 +183,6 @@ public class TestingController {
         } catch (JsonProcessingException e) {
             e.printStackTrace();
         }
-    }
-
-    // Remember to shut down the executor service appropriately
-    @PreDestroy
-    public void shutdown() {
-        executorService.shutdown();
     }
 
 }
