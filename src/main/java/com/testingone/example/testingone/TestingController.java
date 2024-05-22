@@ -163,7 +163,6 @@ public class TestingController {
             batch.add(cursor.next());
             if (batch.size() == batchSize || !cursor.hasNext()) {
                 List<Document> currentBatch = new ArrayList<>(batch);
-                System.out.println("current batch is " + currentBatch);
                 processBatch(currentBatch, clientId, topicName,collectionName);
                 batch.clear();
             }
@@ -205,7 +204,7 @@ public class TestingController {
         }
     }
 
-    @Async("taskExecutor")
+
     private void startChangeStream(String clientId, String topicName, String collectionName) {
         while (running) {
             try (MongoChangeStreamCursor<ChangeStreamDocument<Document>> cursor = (MongoChangeStreamCursor<ChangeStreamDocument<Document>>) mongoTemplate
@@ -213,27 +212,41 @@ public class TestingController {
                     .watch()
                     .fullDocument(FullDocument.UPDATE_LOOKUP)
                     .iterator()) {
-                long startTime = System.currentTimeMillis();
-                boolean dataReceived = false;
 
+//                long startTime = System.currentTimeMillis();
+//                boolean dataReceived = false;
+                List<Document> batch = new ArrayList<>();
+                int batchSize = 100;
+                if(getLastProcessedDocumentId(clientId,collectionName)==null){
+                    processDocumentsInBatches(clientId,topicName,collectionName,null);
+                }
                 while (cursor.hasNext() && running) {
                     ChangeStreamDocument<Document> change = cursor.next();
                     Document document = change.getFullDocument();
                     if (document != null) {
-                        processDocument(document, clientId, topicName,collectionName);
-                        dataReceived = true;
-                        startTime = System.currentTimeMillis();
+                        batch.add(document);
+                        if (batch.size() == batchSize) {
+                            processBatch(batch, clientId, topicName, collectionName);
+                            batch.clear();
+                        }
+//                        dataReceived = true;
+//                        startTime = System.currentTimeMillis();
                     }
                 }
 
-                // Check if data was received within 10 seconds
-                if (!dataReceived && (System.currentTimeMillis() - startTime) >= 10000) {
-                    System.out.println("No data received for 10 seconds. Exiting...");
-                    return;
+                // Process any remaining documents in the batch
+                if (!batch.isEmpty()) {
+                    processBatch(batch, clientId, topicName, collectionName);
                 }
 
+                // Check if data was received within 10 seconds
+//                if (!dataReceived && (System.currentTimeMillis() - startTime) >= 10000) {
+//                    running = false;
+//                    System.out.println("No data received for 10 seconds. Exiting...");
+//                    return;
+//                }
+
             } catch (Exception e) {
-//                e.printStackTrace();
                 System.out.println("Destroying Threads");
                 System.out.println("Change stream cursor disconnected.");
                 return;
@@ -241,6 +254,7 @@ public class TestingController {
         }
     }
 
+    //Not in use but can be used of you want to send each single document
     @Async("taskExecutor")
     private void processDocument(Document document, String clientId, String topicName,String collectionName) {
         try {
