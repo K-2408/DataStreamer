@@ -130,7 +130,7 @@ public class TestingController {
         return clientDocOpt.get().getString("clientId");
     }
 
-    private void createTopicIfNotExists(String topicName, int numPartitions) {
+    public void createTopicIfNotExists(String topicName, int numPartitions) {
         try (AdminClient adminClient = AdminClient.create(kafkaAdmin.getConfigurationProperties())) {
             if (!adminClient.listTopics().names().get().contains(topicName)) {
                 NewTopic newTopic = new NewTopic(topicName, numPartitions, (short) 1);
