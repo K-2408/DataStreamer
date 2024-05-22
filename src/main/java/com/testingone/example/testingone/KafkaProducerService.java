@@ -30,7 +30,7 @@ public class KafkaProducerService {
         configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         configProps.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 102400); // 100KB buffer size
         configProps.put(ProducerConfig.BATCH_SIZE_CONFIG, 81920); // 80KB batch size
-        configProps.put(ProducerConfig.LINGER_MS_CONFIG, 10); // 1ms linger time
+        configProps.put(ProducerConfig.LINGER_MS_CONFIG, 10); // 10ms linger time
         configProps.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "gzip");
 
         ProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(configProps);
