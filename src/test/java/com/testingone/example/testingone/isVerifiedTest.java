@@ -15,11 +15,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-import java.util.Collections;
 import java.util.List;
 
 @ExtendWith(MockitoExtension.class)
-public class TestingControllerTest {
+public class isVerifiedTest {
 
     @Mock
     private MongoTemplate mongoTemplate;
