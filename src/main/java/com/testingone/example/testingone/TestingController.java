@@ -91,7 +91,7 @@ public class TestingController {
         }
 
         String collectionName="collectionRedditData";
-//        String collectionName="smallTestingCollection";
+        //        String collectionName="smallTestingCollection";
 
 
         // Log client activity (you can enhance this as needed)
@@ -176,6 +176,9 @@ public class TestingController {
 
         List<Document> batch = new ArrayList<>();
         System.out.println("cursor.hasNext() " +cursor.hasNext());
+        if(!cursor.hasNext()){
+            startChangeStream(clientId,topicName,collectionName);
+        }
         while (cursor.hasNext()) {
             batch.add(cursor.next());
             if (batch.size() == batchSize || !cursor.hasNext()) {
