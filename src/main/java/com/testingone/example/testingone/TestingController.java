@@ -2,7 +2,10 @@ package com.testingone.example.testingone;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mongodb.ClientSessionOptions;
+import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoChangeStreamCursor;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
 import com.mongodb.client.model.changestream.FullDocument;
@@ -88,6 +91,8 @@ public class TestingController {
         }
 
         String collectionName="collectionRedditData";
+//        String collectionName="smallTestingCollection";
+
 
         // Log client activity (you can enhance this as needed)
         System.out.println("Client " + clientId + " started streaming");
@@ -116,6 +121,17 @@ public class TestingController {
         return "Offset reset successfully for client: " + clientId + " and collection: " + collectionName;
     }
 
+    @PostMapping("/request-offset-from")
+    public String resetOffsetFrom(@RequestHeader("Authorization") String authToken, @RequestParam String collectionName, @RequestParam String lastProcessedId){
+        String clientId = isVerified(authToken);
+        if (clientId.equals("Unauthorized")) {
+            return "Unauthorized";
+        }
+
+        updateLastProcessedDocumentId(clientId,collectionName,lastProcessedId);
+        return "Offset reset successfully for client: " + clientId + " and collection: " + collectionName;
+    }
+
     public String isVerified(String authToken){
         Optional<Document> clientDocOpt = mongoTemplate.getCollection("collectionClientData")
                 .find(new Document("authToken", authToken))
@@ -138,12 +154,13 @@ public class TestingController {
                 System.out.println("Created topic: " + topicName);
             }
         } catch (InterruptedException | ExecutionException e) {
-            e.printStackTrace();
+//            e.printStackTrace();
+            System.out.println("Problem in creating Topic, please try again!");
         }
     }
 
     @Async("taskExecutor")
-    private void processDocumentsInBatches(String clientId, String topicName,String collectionName,String lastProcessedId) {
+    public void processDocumentsInBatches(String clientId, String topicName,String collectionName,String lastProcessedId) {
         int batchSize = 100; // Adjust the batch size as needed
         Bson filter = new Document();
         if (lastProcessedId != null) {
@@ -151,7 +168,7 @@ public class TestingController {
                 ObjectId lastProcessedObjectId = new ObjectId(lastProcessedId);
                 filter = gt("_id", lastProcessedObjectId);
             } catch (IllegalArgumentException e) {
-                e.printStackTrace();
+//                e.printStackTrace();
                 System.out.println("Invalid lastProcessedId format. Starting from the beginning.");
             }
         }
@@ -170,37 +187,56 @@ public class TestingController {
     }
 
     @Async("taskExecutor")
-    private void processBatch(List<Document> batch, String clientId, String topicName,String collectionName) {
-        List<String> jsonDocuments = new ArrayList<>();
-        Document lastDocument = null;
-        for (Document document : batch) {
-            try {
-                String jsonDocument = objectMapper.writeValueAsString(document);
-                jsonDocuments.add(jsonDocument);
-                lastDocument = document;
-                if (jsonDocuments.size() == 5) {
-                    sendBatch(jsonDocuments, clientId, topicName,document.getObjectId("_id").toHexString(),collectionName);
-                    jsonDocuments.clear();
+    private void processBatch(List<Document> batch, String clientId, String topicName, String collectionName) {
+        ClientSessionOptions options = ClientSessionOptions.builder()
+                .causallyConsistent(true)  // Enable causal consistency
+                .build();
+        try (ClientSession session = mongoTemplate.getMongoDatabaseFactory().getSession(options)) {
+            session.startTransaction();
+            List<String> jsonDocuments = new ArrayList<>();
+            Document lastDocument = null;
+            for (Document document : batch) {
+                try {
+                    String jsonDocument = objectMapper.writeValueAsString(document);
+                    jsonDocuments.add(jsonDocument);
+                    lastDocument = document;
+                    if (jsonDocuments.size() == 5) {
+                        sendBatch(jsonDocuments, clientId, topicName, document.getObjectId("_id").toHexString(), collectionName);
+                        jsonDocuments.clear();
+                    }
+                } catch (JsonProcessingException e) {
+//                    e.printStackTrace();
+                    System.out.println("Problem in creating document to string, please try again!");
                 }
-            } catch (JsonProcessingException e) {
-                e.printStackTrace();
             }
-        }
-        // Send any remaining documents if the count is less than 10
-        if (!jsonDocuments.isEmpty()) {
-            sendBatch(jsonDocuments, clientId, topicName,lastDocument.getObjectId("_id").toHexString(),collectionName);
+            if (!jsonDocuments.isEmpty()) {
+                sendBatch(jsonDocuments, clientId, topicName, lastDocument.getObjectId("_id").toHexString(), collectionName);
+            }
+            session.commitTransaction();
+        } catch (Exception e) {
+//            e.printStackTrace();
+            System.out.println("Problem in creating client Session, please try again!");
         }
     }
 
+
     @Async("taskExecutor")
-    private void sendBatch(List<String> jsonDocuments, String clientId, String topicName,String lastProcessesId,String collectionName) {
+    private void sendBatch(List<String> jsonDocuments, String clientId, String topicName, String lastProcessedId, String collectionName) {
         try {
             String jsonArray = objectMapper.writeValueAsString(jsonDocuments);
             kafkaProducerService.sendMessage(topicName, jsonArray);
-            updateLastProcessedDocumentId(clientId,collectionName,lastProcessesId);
+            // After successfully sending the batch, update the last processed ID
+            acknowledgeBatchProcessed(clientId, collectionName, lastProcessedId);
             System.out.println(clientId + " Batch: " + jsonArray);
         } catch (JsonProcessingException e) {
-            e.printStackTrace();
+//            e.printStackTrace();
+            System.out.println("Problem in sending batch, please try again!");
+        }
+    }
+
+    private void acknowledgeBatchProcessed(String clientId, String collectionName, String lastProcessedId) {
+        synchronized (this) {
+            updateLastProcessedDocumentId(clientId, collectionName, lastProcessedId);
         }
     }
 
@@ -263,7 +299,8 @@ public class TestingController {
             updateLastProcessedDocumentId(clientId,collectionName,document.getObjectId("_id").toHexString());
             System.out.println(clientId + " Document: " + jsonDocument);
         } catch (JsonProcessingException e) {
-            e.printStackTrace();
+//            e.printStackTrace();
+            System.out.println("Problem in sending document, please try again!");
         }
     }
 
@@ -276,7 +313,7 @@ public class TestingController {
         return offsetDoc != null ? offsetDoc.getString("lastProcessedId") : null;
     }
 
-    private void updateLastProcessedDocumentId(String clientId, String collectionName, String lastProcessedId) {
+    private synchronized void updateLastProcessedDocumentId(String clientId, String collectionName, String lastProcessedId) {
         mongoTemplate.getCollection("clientOffsets").updateOne(
                 new Document("clientId", clientId).append("collectionName", collectionName),
                 new Document("$set", new Document("lastProcessedId", lastProcessedId)),
@@ -289,5 +326,22 @@ public class TestingController {
                 new Document("clientId", clientId).append("collectionName", collectionName)
         );
     }
+//
+//    private void trackBatchProcessing(String clientId, String collectionName, String batchId) {
+//        mongoTemplate.getCollection("processedBatches").insertOne(
+//                new Document("clientId", clientId)
+//                        .append("collectionName", collectionName)
+//                        .append("batchId", batchId)
+//        );
+//    }
+//
+//    private boolean isBatchProcessed(String clientId, String collectionName, String batchId) {
+//        Document processedBatch = mongoTemplate.getCollection("processedBatches")
+//                .find(new Document("clientId", clientId)
+//                        .append("collectionName", collectionName)
+//                        .append("batchId", batchId))
+//                .first();
+//        return processedBatch != null;
+//    }
 
 }
